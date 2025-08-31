@@ -94,11 +94,11 @@ client.on('interactionCreate', async interaction => {
                 .setColor('#57F287') // Vibrant Green
                 .setTitle('⚔️ Welcome to the Arena, Contender!')
                 .setThumbnail(member.user.displayAvatarURL())
-                .setDescription(`Congratulations, **${member.user.username}**! Your spot in the **Esport Minecraft Tournament** has been officially secured.`)
+                .setDescription(`Congratulations, **${member.user.username}**! Your spot in the **Minecraft Esport Tournament** has been officially secured.`)
                 .addFields(
                     { name: 'Access Granted', value: `You have been given the **${role.name}** role, unlocking exclusive tournament channels.` },
                     { name: 'Next Steps', value: 'Please keep an eye on the announcements channel for bracket information and match schedules.' },
-                    { name: 'Prepare for Battle!', value: 'The journey begins now. Hone your skills and get ready to compete!' }
+                    { name: 'Prepare for Battle!', value: 'The journey begins now. Hone your skills and get ready to compete! See you on 19th September' }
                 )
                 .setFooter({ text: guild.name, iconURL: guild.iconURL() })
                 .setTimestamp();
