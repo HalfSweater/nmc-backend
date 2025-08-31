@@ -56,7 +56,7 @@ app.post('/register', async (req, res) => {
                 const timeLeft = COOLDOWN_PERIOD - timeSinceLastSubmission;
                 // Return a "Too Many Requests" error with a helpful message
                 return res.status(429).json({ 
-                    message: `You have already applied. Please try again in ${formatTimeLeft(timeLeft)}.`
+                    message: `You have already applied.`
                 });
             }
         }
