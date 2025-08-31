@@ -1,4 +1,4 @@
-// Load environment variables from .env file
+// Load environment variables from your .env file
 require('dotenv').config();
 
 // Import necessary libraries
@@ -6,36 +6,67 @@ const express = require('express');
 const cors = require('cors');
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
+// --- In-memory store for rate limiting ---
+// We use a Map to store: <discordId, timestampOfLastSubmission>
+const submissions = new Map();
+const COOLDOWN_PERIOD = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
 // --- Discord Bot Setup ---
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers, // Required to find members and manage roles
+        GatewayIntentBits.GuildMembers, // Required to find members, send DMs, and manage roles
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent
     ]
 });
 
-// Log in the bot
 client.login(process.env.BOT_TOKEN);
 client.once('ready', () => {
     console.log(`Bot is online as ${client.user.tag}!`);
 });
-
 
 // --- Express Server Setup ---
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- API Endpoint for Registration (No Changes Here) ---
+// --- Helper function to format time left ---
+function formatTimeLeft(ms) {
+    if (ms <= 0) return "now";
+    let totalSeconds = Math.floor(ms / 1000);
+    let hours = Math.floor(totalSeconds / 3600);
+    totalSeconds %= 3600;
+    let minutes = Math.floor(totalSeconds / 60);
+    return `${hours} hour(s) and ${minutes} minute(s)`;
+}
+
+// --- API Endpoint for Registration with Rate Limiting ---
 app.post('/register', async (req, res) => {
     try {
         const { fullName, age, email, ign, discordId } = req.body;
+        
+        // --- Rate Limiting Logic ---
+        const now = Date.now();
+        if (submissions.has(discordId)) {
+            const lastSubmissionTime = submissions.get(discordId);
+            const timeSinceLastSubmission = now - lastSubmissionTime;
+
+            if (timeSinceLastSubmission < COOLDOWN_PERIOD) {
+                const timeLeft = COOLDOWN_PERIOD - timeSinceLastSubmission;
+                // Return a "Too Many Requests" error with a helpful message
+                return res.status(429).json({ 
+                    message: `You have already applied. Please try again in ${formatTimeLeft(timeLeft)}.`
+                });
+            }
+        }
+        // --- End of Rate Limiting Logic ---
+
         const channel = await client.channels.fetch(process.env.CHANNEL_ID);
         if (!channel) {
             return res.status(500).json({ message: "Discord channel not found." });
         }
+        
         const embed = new EmbedBuilder()
             .setTitle('New Tournament Registration!')
             .setColor('#3f51b5')
@@ -47,20 +78,27 @@ app.post('/register', async (req, res) => {
                 { name: 'Discord ID', value: discordId, inline: true }
             )
             .setFooter({ text: `Registration received at: ${new Date().toLocaleString()}` });
+
         const row = new ActionRowBuilder()
             .addComponents(
                 new ButtonBuilder().setCustomId(`accept-${discordId}`).setLabel('Accept').setStyle(ButtonStyle.Success),
                 new ButtonBuilder().setCustomId(`deny-${discordId}`).setLabel('Deny').setStyle(ButtonStyle.Danger)
             );
+
         await channel.send({ embeds: [embed], components: [row] });
+
+        // Record the successful submission time to enforce the cooldown
+        submissions.set(discordId, now);
+
         res.status(200).json({ message: 'Registration sent successfully!' });
+
     } catch (error) {
         console.error("Error processing registration:", error);
         res.status(500).json({ message: "An internal server error occurred." });
     }
 });
 
-// --- Listener for Button Interactions (FULLY UPDATED) ---
+// --- Listener for Button Interactions ---
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
 
@@ -79,7 +117,6 @@ client.on('interactionCreate', async interaction => {
 
     try {
         if (action === 'accept') {
-            // --- NEW: Assign the role ---
             const role = guild.roles.cache.get(process.env.ACCEPTED_ROLE_ID);
             if (role) {
                 await member.roles.add(role);
@@ -89,16 +126,15 @@ client.on('interactionCreate', async interaction => {
                 return;
             }
 
-            // --- NEW: "Sexy" Acceptance DM using an Embed ---
             const acceptEmbed = new EmbedBuilder()
-                .setColor('#57F287') // Vibrant Green
+                .setColor('#57F287')
                 .setTitle('⚔️ Welcome to the Arena, Contender!')
                 .setThumbnail(member.user.displayAvatarURL())
-                .setDescription(`Congratulations, **${member.user.username}**! Your spot in the **Minecraft Esport Tournament** has been officially secured.`)
+                .setDescription(`Congratulations, **${member.user.username}**! Your spot in the **Esport Minecraft Tournament** has been officially secured.`)
                 .addFields(
                     { name: 'Access Granted', value: `You have been given the **${role.name}** role, unlocking exclusive tournament channels.` },
                     { name: 'Next Steps', value: 'Please keep an eye on the announcements channel for bracket information and match schedules.' },
-                    { name: 'Prepare for Battle!', value: 'The journey begins now. Hone your skills and get ready to compete! See you on 19th September' }
+                    { name: 'Prepare for Battle!', value: 'The journey begins now. Hone your skills and get ready to compete!' }
                 )
                 .setFooter({ text: guild.name, iconURL: guild.iconURL() })
                 .setTimestamp();
@@ -107,9 +143,8 @@ client.on('interactionCreate', async interaction => {
             await interaction.editReply({ content: `✅ **Accepted** ${member.user.tag} and assigned the "${role.name}" role.`, components: [] });
 
         } else if (action === 'deny') {
-            // --- NEW: Professional Denial DM using an Embed ---
             const denyEmbed = new EmbedBuilder()
-                .setColor('#ED4245') // Red
+                .setColor('#ED4245')
                 .setTitle('Registration Status Update')
                 .setDescription(`Hello **${member.user.username}**, thank you for your interest in the **Esport Minecraft Tournament**.`)
                 .addFields(
@@ -124,7 +159,7 @@ client.on('interactionCreate', async interaction => {
         }
     } catch (error) {
         console.error("Error during interaction processing:", error);
-        if (error.code === 50007) { // Discord error code for "Cannot send messages to this user"
+        if (error.code === 50007) {
             await interaction.followUp({ content: `⚠️ Could not send a DM to ${member.user.tag}. They may have DMs disabled.`, ephemeral: true });
         } else {
             await interaction.followUp({ content: `⚠️ An error occurred while processing this action. Please check the bot's permissions and role hierarchy.`, ephemeral: true });
